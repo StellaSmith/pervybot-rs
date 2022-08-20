@@ -1,5 +1,3 @@
-#![feature(iter_intersperse)]
-
 use serenity::async_trait;
 use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{CommandResult, StandardFramework};
@@ -18,14 +16,12 @@ impl EventHandler for Handler {
         println!("connected as {}", bot_data.user.tag());
         // at this point in time we might not be connected to a guild, so we fetch them
         let guilds = ctx.cache.current_user().guilds(&ctx.http).await.unwrap();
-        println!(
-            "joined to:\n\t{}",
-            guilds
-                .iter()
-                .map(|guild| guild.name.as_str())
-                .intersperse("\n\t")
-                .collect::<String>(),
-        )
+        let guild_names = guilds
+            .iter()
+            .map(|guild| guild.name.as_str())
+            .collect::<Vec<_>>();
+
+        println!("joined to:\n\t{}", guild_names.join("\n\t"));
     }
 }
 
