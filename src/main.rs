@@ -1,8 +1,10 @@
+use lazy_static::lazy_static;
 use serenity::async_trait;
 use serenity::framework::standard::macros::{command, group};
 use serenity::framework::standard::{CommandResult, StandardFramework};
 use serenity::model::channel::Message;
 use serenity::prelude::*;
+use std::collections::HashSet;
 
 #[group]
 #[commands(ping)]
@@ -13,7 +15,7 @@ struct Handler;
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, bot_data: serenity::model::gateway::Ready) {
-        println!("connected as {}", bot_data.user.tag());
+        log::info!("connected as {}", bot_data.user.tag());
         // at this point in time we might not be connected to a guild, so we fetch them
         let guilds = ctx.cache.current_user().guilds(&ctx.http).await.unwrap();
         let guild_names = guilds
@@ -21,7 +23,7 @@ impl EventHandler for Handler {
             .map(|guild| guild.name.as_str())
             .collect::<Vec<_>>();
 
-        println!("joined to:\n\t{}", guild_names.join("\n\t"));
+        log::info!("joined to:\n\t{}", guild_names.join("\n\t"));
     }
 }
 
@@ -31,7 +33,16 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
     // don't like having to rebuild a regex each time
     let re = regex::Regex::new(&format!(r"(\s*<@{bot_id}>\s*)")).unwrap();
     re.captures(&msg.content)
-        .and_then(|captures| captures.get(1)).map(|m| m.as_str().to_owned())
+        .and_then(|captures| captures.get(1))
+        .map(|m| m.as_str().to_owned())
+}
+
+lazy_static! {
+    static ref NO_INHERIT_ENV: HashSet<&'static str> = {
+        let mut s = HashSet::<&'static str>::default();
+        s.insert(&"DISCORD_TOKEN");
+        s
+    };
 }
 
 #[tokio::main]
@@ -43,6 +54,18 @@ async fn main() {
         }
         Ok(ok) => ok,
     };
+
+    // environment variables are inherited,
+    // we don't want any of the process we spawn contain these variables
+    // so we don't set them
+    for (k, v) in env_conf
+        .iter()
+        .filter(|(k, ..)| !NO_INHERIT_ENV.contains(k.as_str()))
+    {
+        std::env::set_var(k, v)
+    }
+
+    env_logger::init();
 
     let framework = StandardFramework::new()
         .configure(|c| {
@@ -63,7 +86,7 @@ async fn main() {
 
     // start listening for events by starting a single shard
     if let Err(why) = client.start().await {
-        println!("An error occurred while running the client: {:?}", why);
+        log::error!("An error occurred while running the client: {:?}", why);
     }
 }
 
