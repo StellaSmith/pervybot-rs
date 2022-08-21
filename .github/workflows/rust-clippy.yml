@@ -48,4 +48,4 @@ jobs:
         uses: peter-evans/create-pull-request@v4
         with:
           # The new branch
-          branch: ${{ github.event.pull_request.title }}/clippy-fix
+          branch: ${{ format('clippy-fix/{0}', github.event.pull_request.title) }}
