@@ -31,8 +31,7 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
     // don't like having to rebuild a regex each time
     let re = regex::Regex::new(&format!(r"(\s*<@{bot_id}>\s*)")).unwrap();
     re.captures(&msg.content)
-        .and_then(|captures| captures.get(1))
-        .and_then(|m| Some(m.as_str().to_owned()))
+        .and_then(|captures| captures.get(1)).map(|m| m.as_str().to_owned())
 }
 
 #[tokio::main]
