@@ -40,7 +40,7 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
 lazy_static! {
     static ref NO_INHERIT_ENV: HashSet<&'static str> = {
         let mut s = HashSet::<&'static str>::default();
-        s.insert(&"DISCORD_TOKEN");
+        s.insert("DISCORD_TOKEN");
         s
     };
 }
