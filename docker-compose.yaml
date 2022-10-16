@@ -1,0 +1,23 @@
+version: "3"
+services:
+  pervybot:
+    build: .
+    restart: always
+    depends_on:
+      - postgres
+    env_file: .env
+    environment:
+      DATABASE_URL: "postgres://pervybot:pervybot@postgres/pervybot"
+  postgres:
+    image: docker.io/library/postgres:latest
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: "pervybot"
+      POSTGRES_PASSWORD: "pervybot"
+      POSTGRES_DB: "pervybot"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+volumes:
+  postgres_data:
