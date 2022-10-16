@@ -1,4 +1,4 @@
-FROM rust:latest as build
+FROM docker.io/library/rust:1-slim as build
 # RUN rustup target add x86_64-unknown-linux-musl
 WORKDIR /usr/src/pervybot-rs
 COPY . .
