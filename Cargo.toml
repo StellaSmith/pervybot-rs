@@ -8,16 +8,10 @@ edition = "2021"
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 serenity = "0.11"
-sqlx = { version = "0.6", features = [
-    "runtime-tokio-rustls",
-    "any",
-    "postgres",
-    "mysql",
-    "sqlite",
-] }
+sqlx = { version = "0.6", features = ["runtime-tokio-rustls", "postgres"] }
 dotenv = "0.15"
-regex = "1.6.0"
-env-file-reader = "0.3.0"
+regex = "1.6"
+env-file-reader = "0.3"
 
 lazy_static = "1.4"
 log = "0.4"
