@@ -22,3 +22,12 @@ env-file-reader = "0.3.0"
 lazy_static = "1.4"
 log = "0.4"
 env_logger = "0.9"
+
+# For validating user-inputed URLs
+url = "2.3.1"
+# For hashing URLs with SHA256 (internet search has deemed it fast)
+ring = { git = "https://github.com/briansmith/ring" }
+# For running commands asynchronously
+async-process = "1.5.0"
+# For parsing info.json
+serde_json = "1.0.86"

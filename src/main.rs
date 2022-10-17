@@ -1,5 +1,7 @@
 mod commands;
 mod database;
+mod external;
+mod hashing;
 
 use serenity::async_trait;
 
@@ -7,6 +9,15 @@ use serenity::framework::StandardFramework;
 use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
 use serenity::prelude::*;
+
+const STREAM_DIR: &str = "./stream_queue";
+
+fn init() {
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .create(STREAM_DIR)
+        .unwrap();
+}
 
 struct Handler;
 
@@ -52,6 +63,7 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
     env_logger::init();
+    init();
 
     let framework = StandardFramework::new()
         .configure(|c| {
