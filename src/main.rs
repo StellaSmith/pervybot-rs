@@ -10,7 +10,7 @@ use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
 use serenity::prelude::*;
 
-const STREAM_DIR: &str = "./stream_queue";
+const STREAM_DIR: &str = "./stream_queue/";
 
 fn init() {
     std::fs::DirBuilder::new()
