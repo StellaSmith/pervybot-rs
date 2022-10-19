@@ -26,7 +26,7 @@ env_logger = "0.9"
 # For validating user-inputed URLs
 url = "2.3.1"
 # For hashing URLs with SHA256 (internet search has deemed it fast)
-ring = { git = "https://github.com/briansmith/ring" }
+ring = "0.16"
 # For running commands asynchronously
 async-process = "1.5.0"
 # For parsing info.json
