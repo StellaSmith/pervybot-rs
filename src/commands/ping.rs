@@ -1,8 +1,8 @@
-use lazy_static::__Deref;
 use serenity::framework::standard::macros::command;
 use serenity::framework::standard::CommandResult;
 use serenity::model::channel::Message;
 use serenity::prelude::*;
+use std::ops::Deref;
 
 use crate::database;
 
@@ -20,7 +20,7 @@ pub async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
         let message_id: i64 = msg.id.0.try_into().unwrap();
         let timestamp = msg.timestamp.deref();
 
-        match sqlx::query("INSERT INTO pings (author_id, channel_id, message_id, \"timestamp\") VALUES ($1, $2, $3, $4);")
+        match sqlx::query("INSERT INTO pings (author_id, channel_id, message_id, timestamp) VALUES ($1, $2, $3, $4)")
             .bind(author_id)
             .bind(channel_id)
             .bind(message_id)
