@@ -4,6 +4,7 @@ use std::io::Write;
 use async_process::Command;
 use reqwest::Client;
 use serde_json::{de::from_reader, Value};
+use unix_named_pipe::{create, open_write};
 use url::Url;
 
 use crate::hashing::{hash_url, UrlHash};
@@ -161,24 +162,81 @@ pub async fn download_stream(url_hash: UrlHash, req_client: Client) {
     let video_url = get_video_url(&data);
     let subs_urls = get_subs_urls(&data);
     let thumbnail_url = get_max_res_thumbnail_url(&data);
-    let title = get_stream_title(&data);
+    let title = get_stream_title(&data).unwrap_or("unkown".into());
 
-    if let Some((url, extension)) = audio_url {
+    let audio_data = if let Some((url, extension)) = audio_url {
         if let Ok(res) = req_client.post(url).send().await {
-            let mut file = File::create(format!["{base_path}/audio.{extension}"]).unwrap();
-            file.write_all(&res.bytes().await.unwrap()).unwrap();
+            Some((res.bytes(), extension))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let video_data = if let Some((url, extension)) = video_url {
+        if let Ok(res) = req_client.post(url).send().await {
+            Some((res.bytes(), extension))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    let mut subs_data = Vec::with_capacity(subs_urls.len());
+    for (lang, _name, url, extension) in subs_urls {
+        if let Ok(res) = req_client.post(url).send().await {
+            subs_data.push((res.bytes(), lang, extension));
         }
     }
-    if let Some((url, extension)) = video_url {
+    let thumbnail_data = if let Some(url) = thumbnail_url {
+        let extension = url
+            .rsplit('.')
+            .take(1)
+            .map(|s| s.to_owned())
+            .next()
+            .unwrap_or_default();
         if let Ok(res) = req_client.post(url).send().await {
-            let mut file = File::create(format!["{base_path}/video.{extension}"]).unwrap();
-            file.write_all(&res.bytes().await.unwrap()).unwrap();
+            Some((res.bytes(), extension))
+        } else {
+            None
         }
-    }
-    for (lang, name, url, extension) in subs_urls {
-        
+    } else {
+        None
+    };
+
+    match (audio_data, video_data) {
+        (None, None) => panic![],
+        (None, Some(video_data)) => {
+            let video_pipe_path = format!["{base_path}/video"];
+            let output_path = format!["{base_path}/{title}.mkv"];
+            create(&video_pipe_path, Some(0o644)).unwrap();
+            let mut write_file = open_write(&video_pipe_path).unwrap();
+            write_file.write_all(&video_data.0.await.unwrap()).unwrap();
+            Command::new("ffmpeg")
+                .arg("-i")
+                .arg(video_pipe_path)
+                .arg("-r")
+                .arg("24")
+                .arg(output_path);
+        }
+        (Some(audio_data), None) => {
+            let audio_pipe_path = format!["{base_path}/audo"];
+            let output_path = format!["{base_path}/{title}.mka"];
+            create(&audio_pipe_path, Some(0o644)).unwrap();
+            let mut write_file = open_write(&audio_pipe_path).unwrap();
+            write_file.write_all(&audio_data.0.await.unwrap()).unwrap();
+            Command::new("ffmpeg")
+                .arg("-i")
+                .arg(audio_pipe_path)
+                .arg("-r")
+                .arg("24")
+                .arg(output_path);
+        }
+        (Some(_), Some(_)) => todo!(),
     }
 }
+
+// (bv[height<=720]+ba/bv[height<=720]*+ba/b[height<=720])[filesize<100M]
 
 pub async fn download_info_json(url: Url) -> UrlHash {
     let url_hash = hash_url(url.clone());

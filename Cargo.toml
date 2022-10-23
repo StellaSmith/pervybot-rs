@@ -23,6 +23,10 @@ lazy_static = "1.4"
 log = "0.4"
 env_logger = "0.9"
 
+# For piping to ffmpeg
+unix-named-pipe = "0.2"
+# For downloading content streams
+reqwest = "0.11"
 # For validating user-inputed URLs
 url = "2.3"
 # For hashing URLs with SHA256 (internet search has deemed it fast)
