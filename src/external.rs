@@ -1,6 +1,8 @@
 use std::fs::File;
+use std::io::Write;
 
 use async_process::Command;
+use reqwest::Client;
 use serde_json::{de::from_reader, Value};
 use url::Url;
 
@@ -9,31 +11,6 @@ use crate::STREAM_DIR;
 
 const MAX_VIDEO_SIZE: u64 = 1024 * 1024 * 100;
 const MAX_VERTICAL_RESOLUTION: u64 = 720;
-
-fn get_subs_urls(data: &Value) -> Vec<(String, String, String, String)> {
-    let mut output = vec![];
-    if let Some(Value::Object(subs)) = data.get("subtitles") {
-        let mut lang = "";
-        let mut url = "";
-        let mut ext = "";
-        for (lang_code, subs) in subs {
-            if let (
-                Some(Value::String(name)),
-                Some(Value::String(url)),
-                Some(Value::String(extension)),
-            ) = (subs.get("name"), subs.get("url"), subs.get("ext"))
-            {
-                output.push((
-                    lang_code.to_owned(),
-                    name.to_owned(),
-                    url.to_owned(),
-                    extension.to_owned(),
-                ))
-            }
-        }
-    }
-    output
-}
 
 fn get_audio_url(data: &Value) -> Option<(String, String)> {
     if let Some(Value::Array(formats)) = data.get("formats") {
@@ -106,6 +83,32 @@ fn get_video_url(data: &Value) -> Option<(String, String)> {
     }
 }
 
+fn get_subs_urls(data: &Value) -> Vec<(String, String, String, String)> {
+    let mut output = vec![];
+    if let Some(Value::Object(subs)) = data.get("subtitles") {
+        for (lang_code, subs) in subs {
+            if let Value::Array(subs) = subs {
+                if let Some(Value::Object(subs)) = subs.get(0) {
+                    if let (
+                        Some(Value::String(name)),
+                        Some(Value::String(url)),
+                        Some(Value::String(extension)),
+                    ) = (subs.get("name"), subs.get("url"), subs.get("ext"))
+                    {
+                        output.push((
+                            lang_code.to_owned(),
+                            name.to_owned(),
+                            url.to_owned(),
+                            extension.to_owned(),
+                        ))
+                    }
+                }
+            }
+        }
+    }
+    output
+}
+
 fn get_max_res_thumbnail_url(data: &Value) -> Option<String> {
     if let Some(Value::String(url)) = data.get("thumbnail") {
         Some(url.into())
@@ -150,15 +153,31 @@ fn get_stream_title(data: &Value) -> Option<String> {
     }
 }
 
-pub async fn download_stream(url_hash: UrlHash) {
-    let base_path = format!["{STREAM_DIR}{}/", url_hash.0];
+pub async fn download_stream(url_hash: UrlHash, req_client: Client) {
+    let base_path = format!["{STREAM_DIR}/{}", url_hash.0];
     let json_path = format!["{base_path}/info.json"];
     let data: Value = from_reader(File::open(json_path).unwrap()).unwrap();
-    let title = get_stream_title(&data);
-    let thumbnail_url = get_max_res_thumbnail_url(&data);
-    let video_url = get_video_url(&data);
     let audio_url = get_audio_url(&data);
+    let video_url = get_video_url(&data);
     let subs_urls = get_subs_urls(&data);
+    let thumbnail_url = get_max_res_thumbnail_url(&data);
+    let title = get_stream_title(&data);
+
+    if let Some((url, extension)) = audio_url {
+        if let Ok(res) = req_client.post(url).send().await {
+            let mut file = File::create(format!["{base_path}/audio.{extension}"]).unwrap();
+            file.write_all(&res.bytes().await.unwrap()).unwrap();
+        }
+    }
+    if let Some((url, extension)) = video_url {
+        if let Ok(res) = req_client.post(url).send().await {
+            let mut file = File::create(format!["{base_path}/video.{extension}"]).unwrap();
+            file.write_all(&res.bytes().await.unwrap()).unwrap();
+        }
+    }
+    for (lang, name, url, extension) in subs_urls {
+        
+    }
 }
 
 pub async fn download_info_json(url: Url) -> UrlHash {
