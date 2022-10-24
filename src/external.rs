@@ -1,10 +1,19 @@
+use std::env::Args;
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::os::unix::prelude::AsRawFd;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread;
 
-use async_process::Command;
+// use async_process::Command;
+use isolang::Language;
 use reqwest::Client;
 use serde_json::{de::from_reader, Value};
-use unix_named_pipe::{create, open_write};
+use serenity::futures::StreamExt;
+use tokio::sync::mpsc::channel;
+use tokio::{io::AsyncWriteExt, process::Command};
+use tokio_command_fds::{CommandFdExt, FdMapping};
 use url::Url;
 
 use crate::hashing::{hash_url, UrlHash};
@@ -13,7 +22,7 @@ use crate::STREAM_DIR;
 const MAX_VIDEO_SIZE: u64 = 1024 * 1024 * 100;
 const MAX_VERTICAL_RESOLUTION: u64 = 720;
 
-fn get_audio_url(data: &Value) -> Option<(String, String)> {
+fn get_audio_url(data: &Value) -> Option<String> {
     if let Some(Value::Array(formats)) = data.get("formats") {
         let mut best = 0;
         let mut best_url = "";
@@ -36,7 +45,7 @@ fn get_audio_url(data: &Value) -> Option<(String, String)> {
             }
         }
         if !best_url.is_empty() {
-            Some((best_url.to_owned(), best_ext.to_owned()))
+            Some(best_url.to_owned())
         } else {
             None
         }
@@ -45,7 +54,7 @@ fn get_audio_url(data: &Value) -> Option<(String, String)> {
     }
 }
 
-fn get_video_url(data: &Value) -> Option<(String, String)> {
+fn get_video_url(data: &Value) -> Option<String> {
     if let Some(Value::Array(formats)) = data.get("formats") {
         let mut best = 0;
         let mut best_url = "";
@@ -75,7 +84,7 @@ fn get_video_url(data: &Value) -> Option<(String, String)> {
             }
         }
         if !best_url.is_empty() {
-            Some((best_url.to_owned(), best_ext.to_owned()))
+            Some(best_url.to_owned())
         } else {
             None
         }
@@ -162,77 +171,130 @@ pub async fn download_stream(url_hash: UrlHash, req_client: Client) {
     let video_url = get_video_url(&data);
     let subs_urls = get_subs_urls(&data);
     let thumbnail_url = get_max_res_thumbnail_url(&data);
-    let title = get_stream_title(&data).unwrap_or("unkown".into());
+    let title = get_stream_title(&data).unwrap_or_else(|| "unkown".into());
 
-    let audio_data = if let Some((url, extension)) = audio_url {
-        if let Ok(res) = req_client.post(url).send().await {
-            Some((res.bytes(), extension))
+    let (kill_switch, mut kill_signal) = channel::<()>(1);
+
+    let threadify_dl_stream = |maybe_url: Option<String>, fallible: bool| {
+        if let Some(url) = maybe_url {
+            let client = req_client.clone();
+            let (reader, mut writer) = tokio_pipe::pipe().unwrap();
+            let kill_switch = kill_switch.clone();
+            thread::spawn(move || async move {
+                let mut stream = client.get(url).send().await.unwrap().bytes_stream();
+                while let Some(item) = stream.next().await {
+                    if let Ok(bytes) = item {
+                        writer.write_all(&bytes).await.unwrap();
+                    } else if !fallible {
+                        kill_switch.send(()).await.unwrap();
+                        break;
+                    }
+                }
+            });
+            Some(reader)
         } else {
             None
         }
-    } else {
-        None
     };
-    let video_data = if let Some((url, extension)) = video_url {
-        if let Ok(res) = req_client.post(url).send().await {
-            Some((res.bytes(), extension))
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    let mut subs_data = Vec::with_capacity(subs_urls.len());
-    for (lang, _name, url, extension) in subs_urls {
-        if let Ok(res) = req_client.post(url).send().await {
-            subs_data.push((res.bytes(), lang, extension));
+
+    let audio_pipe = threadify_dl_stream(audio_url, false);
+    let video_pipe = threadify_dl_stream(video_url, false);
+    let thumbnail_pipe = threadify_dl_stream(thumbnail_url, true);
+    let mut subs_pipes = Vec::with_capacity(subs_urls.len());
+    for (lang, name, url, extension) in subs_urls {
+        if let Some(pipe) = threadify_dl_stream(Some(url), true) {
+            subs_pipes.push((
+                pipe,
+                name,
+                Language::from_639_1(&lang)
+                    .unwrap_or_else(|| Language::from_639_3(&lang).unwrap_or_default()),
+                extension,
+            ));
         }
     }
-    let thumbnail_data = if let Some(url) = thumbnail_url {
-        let extension = url
-            .rsplit('.')
-            .take(1)
-            .map(|s| s.to_owned())
-            .next()
-            .unwrap_or_default();
-        if let Ok(res) = req_client.post(url).send().await {
-            Some((res.bytes(), extension))
-        } else {
-            None
-        }
+
+    let mut has_video = false;
+    let ext = if video_pipe.is_some() {
+        has_video = true;
+        "mkv"
     } else {
-        None
+        if audio_pipe.is_none() {
+            return;
+        }
+        "mka"
     };
 
-    match (audio_data, video_data) {
-        (None, None) => panic![],
-        (None, Some(video_data)) => {
-            let video_pipe_path = format!["{base_path}/video"];
-            let output_path = format!["{base_path}/{title}.mkv"];
-            create(&video_pipe_path, Some(0o644)).unwrap();
-            let mut write_file = open_write(&video_pipe_path).unwrap();
-            write_file.write_all(&video_data.0.await.unwrap()).unwrap();
-            Command::new("ffmpeg")
-                .arg("-i")
-                .arg(video_pipe_path)
-                .arg("-r")
-                .arg("24")
-                .arg(output_path);
-        }
-        (Some(audio_data), None) => {
-            let audio_pipe_path = format!["{base_path}/audo"];
-            let output_path = format!["{base_path}/{title}.mka"];
-            create(&audio_pipe_path, Some(0o644)).unwrap();
-            let mut write_file = open_write(&audio_pipe_path).unwrap();
-            write_file.write_all(&audio_data.0.await.unwrap()).unwrap();
-            Command::new("ffmpeg")
-                .arg("-i")
-                .arg(audio_pipe_path)
-                .arg("-r")
-                .arg("24")
-                .arg(output_path);
-        }
-        (Some(_), Some(_)) => todo!(),
+    let output_path = format!["{base_path}/{title}.{ext}"];
+
+    let mut cmd = Command::new("ffmpeg");
+
+    let mut fds_to_map = Vec::with_capacity(
+        subs_pipes.len()
+            + if has_video {
+                1 + if audio_pipe.is_some() { 1 } else { 0 }
+            } else {
+                1
+            },
+    );
+
+    if let Some(video_pipe) = video_pipe {
+        let video_fd = video_pipe.as_raw_fd();
+        cmd.arg("-i")
+            .arg(format!["pipe:{video_fd}"])
+            .args(["-map", "0:v"]);
+        fds_to_map.push(video_fd);
+    }
+
+    if let Some(audio_pipe) = audio_pipe {
+        let audio_fd = audio_pipe.as_raw_fd();
+        cmd.arg("-i")
+            .arg(format!["pipe:{audio_fd}"])
+            .args(["-map", "1:a"]);
+        fds_to_map.push(audio_fd);
+    }
+
+    for (i, (pipe, name, lang, extension)) in subs_pipes.iter().enumerate() {
+        let subs_fd = pipe.as_raw_fd();
+        cmd.arg("-f")
+            .arg(extension)
+            .arg("-i")
+            .arg(format!["pipe:{subs_fd}"])
+            .arg("-map")
+            .arg(format!["{}:s", i])
+            .arg(format!["-metadata:s:s:{}", i])
+            .arg(format!["language={}", lang.to_639_3()])
+            .arg(format!["-metadata:s:s:{}", i])
+            .arg(format!["title={}", name]);
+        fds_to_map.push(subs_fd);
+    }
+
+    if let Some(thumbnail_pipe) = thumbnail_pipe {
+        let thumbnail_fd = thumbnail_pipe.as_raw_fd();
+        cmd.arg("-i").arg(format!["pipe:{thumbnail_fd}"]);
+        fds_to_map.push(thumbnail_fd);
+    }
+
+    if has_video {
+        cmd.args(["-r", "30"]);
+    }
+
+    cmd.arg(output_path);
+
+    let fd_mappings: Vec<_> = fds_to_map
+        .iter()
+        .map(|n| FdMapping {
+            parent_fd: *n,
+            child_fd: *n,
+        })
+        .collect();
+
+    cmd.fd_mappings(fd_mappings).unwrap();
+
+    let mut child = cmd.spawn().unwrap();
+
+    tokio::select! {
+        _ = child.wait() => {}
+        _ = kill_signal.recv() => child.kill().await.expect("kill failed")
     }
 }
 
