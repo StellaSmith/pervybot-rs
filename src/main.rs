@@ -1,7 +1,7 @@
 mod commands;
 mod database;
-mod external;
 mod hashing;
+mod downloading;
 
 use serenity::async_trait;
 
