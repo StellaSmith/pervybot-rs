@@ -2,6 +2,7 @@ use std::env::Args;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::os::unix::prelude::AsRawFd;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -9,6 +10,7 @@ use std::thread;
 // use async_process::Command;
 use isolang::Language;
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use serde_json::{de::from_reader, Value};
 use serenity::futures::StreamExt;
 use tokio::sync::mpsc::channel;
@@ -21,6 +23,81 @@ use crate::STREAM_DIR;
 
 const MAX_VIDEO_SIZE: u64 = 1024 * 1024 * 100;
 const MAX_VERTICAL_RESOLUTION: u64 = 720;
+
+#[derive(Deserialize)]
+pub struct Fragment {
+    url: Option<Url>,
+    duration: f64,
+}
+
+#[derive(Deserialize)]
+pub struct Format {
+    asr: Option<u64>,
+    filesize: Option<u64>,
+    format_id: Option<String>,
+    format_note: Option<String>,
+    fps: Option<u64>,
+    source_preference: Option<i64>,
+    quality: Option<u64>,
+    has_drm: Option<bool>,
+    tbr: Option<f64>,
+    ext: Option<String>,
+    protocol: Option<String>,
+    acodec: Option<String>,
+    vcodec: Option<String>,
+    url: Option<Url>,
+    language: Option<String>,
+    language_preference: Option<String>,
+    abr: Option<f64>,
+    vbr: Option<f64>,
+    container: Option<String>,
+    width: Option<u64>,
+    height: Option<u64>,
+    dynamic_range: Option<String>,
+    rows: Option<u64>,
+    columns: Option<u64>,
+    fragments: Vec<Fragment>,
+    audio_ext: Option<String>,
+    video_ext: Option<String>,
+    format: Option<String>,
+    resolution: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SubFormat {
+    ext: Option<String>,
+    url: Option<Url>,
+    name: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct Subtitles {
+    subs: Vec<SubFormat>,
+}
+
+#[derive(Deserialize)]
+pub struct ThumbNailFormat {
+    url: Option<Url>,
+    preference: Option<i64>,
+    id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct StreamData {
+    title: Option<String>,
+    fulltitle: Option<String>,
+    formats: Vec<Format>,
+    subtitles: Vec<(String, Subtitles)>,
+    thumbnails: Vec<ThumbNailFormat>,
+}
+
+fn lang_str_to_lang(s: &str) -> Option<Language> {
+    if let Some(lang) = Language::from_639_1(s) {
+        Some(lang)
+    } else {
+        Language::from_639_3(s)
+    }
+}
 
 fn get_audio_url(data: &Value) -> Option<String> {
     if let Some(Value::Array(formats)) = data.get("formats") {
@@ -54,46 +131,13 @@ fn get_audio_url(data: &Value) -> Option<String> {
     }
 }
 
-fn get_video_url(data: &Value) -> Option<String> {
-    if let Some(Value::Array(formats)) = data.get("formats") {
-        let mut best = 0;
-        let mut best_url = "";
-        let mut best_ext = "";
-        for format in formats {
-            if let Some(Value::String(video_ext)) = format.get("video-ext") {
-                if video_ext != "none" {
-                    if let (
-                        Some(Value::String(url)),
-                        Some(Value::Number(height)),
-                        Some(Value::Number(size)),
-                    ) = (
-                        format.get("url"),
-                        format.get("height"),
-                        format.get("filesize"),
-                    ) {
-                        if height.as_u64().unwrap() > best
-                            && height.as_u64().unwrap() <= MAX_VERTICAL_RESOLUTION
-                            && size.as_u64().unwrap() <= MAX_VIDEO_SIZE
-                        {
-                            best_ext = video_ext;
-                            best = height.as_u64().unwrap();
-                            best_url = url;
-                        }
-                    }
-                }
-            }
-        }
-        if !best_url.is_empty() {
-            Some(best_url.to_owned())
-        } else {
-            None
-        }
-    } else {
-        None
-    }
+fn get_video_urls(data: &Value) -> Vec<(Url, Option<Language>)> {
+    let mut output = Vec::new();
+
+    output
 }
 
-fn get_subs_urls(data: &Value) -> Vec<(String, String, String, String)> {
+fn get_subs_urls(data: &Value) -> Vec<(Url, Option<String>, Option<Language>, Option<String>)> {
     let mut output = vec![];
     if let Some(Value::Object(subs)) = data.get("subtitles") {
         for (lang_code, subs) in subs {
@@ -106,10 +150,10 @@ fn get_subs_urls(data: &Value) -> Vec<(String, String, String, String)> {
                     ) = (subs.get("name"), subs.get("url"), subs.get("ext"))
                     {
                         output.push((
-                            lang_code.to_owned(),
-                            name.to_owned(),
-                            url.to_owned(),
-                            extension.to_owned(),
+                            Url::from_str(url).unwrap(),
+                            name.to_owned().into(),
+                            lang_str_to_lang(lang_code),
+                            extension.to_owned().into(),
                         ))
                     }
                 }
@@ -119,9 +163,9 @@ fn get_subs_urls(data: &Value) -> Vec<(String, String, String, String)> {
     output
 }
 
-fn get_max_res_thumbnail_url(data: &Value) -> Option<String> {
+fn get_max_res_thumbnail_url(data: &Value) -> Option<Url> {
     if let Some(Value::String(url)) = data.get("thumbnail") {
-        Some(url.into())
+        Some(Url::from_str(url).unwrap())
     } else if let Some(Value::Array(thumbnails)) = data.get("thumbnails") {
         let mut max_res_url = None;
         let mut webm_max_res_url = None;
@@ -144,9 +188,9 @@ fn get_max_res_thumbnail_url(data: &Value) -> Option<String> {
             }
         }
         if highest_res >= webm_highest_res {
-            max_res_url.map(|s| s.into())
+            max_res_url.map(|s| Url::from_str(s).unwrap())
         } else {
-            webm_max_res_url.map(|s| s.into())
+            webm_max_res_url.map(|s| Url::from_str(s).unwrap())
         }
     } else {
         None
@@ -163,108 +207,116 @@ fn get_stream_title(data: &Value) -> Option<String> {
     }
 }
 
-pub async fn download_stream(url_hash: UrlHash, req_client: Client) {
+pub async fn download_stream(
+    video_urls: Vec<(Url, Option<Language>)>,
+    audio_urls: Vec<(Url, Option<Language>)>,
+    subs_urls: Vec<(Url, Option<String>, Option<Language>, Option<String>)>,
+    thumbnail_url: Option<Url>,
+    title: Option<String>,
+    url_hash: UrlHash,
+    req_client: Client,
+) {
     let base_path = format!["{STREAM_DIR}/{}", url_hash.0];
-    let json_path = format!["{base_path}/info.json"];
-    let data: Value = from_reader(File::open(json_path).unwrap()).unwrap();
-    let audio_url = get_audio_url(&data);
-    let video_url = get_video_url(&data);
-    let subs_urls = get_subs_urls(&data);
-    let thumbnail_url = get_max_res_thumbnail_url(&data);
-    let title = get_stream_title(&data).unwrap_or_else(|| "unkown".into());
 
     let (kill_switch, mut kill_signal) = channel::<()>(1);
 
-    let threadify_dl_stream = |maybe_url: Option<String>, fallible: bool| {
-        if let Some(url) = maybe_url {
-            let client = req_client.clone();
-            let (reader, mut writer) = tokio_pipe::pipe().unwrap();
-            let kill_switch = kill_switch.clone();
-            thread::spawn(move || async move {
-                let mut stream = client.get(url).send().await.unwrap().bytes_stream();
-                while let Some(item) = stream.next().await {
-                    if let Ok(bytes) = item {
-                        writer.write_all(&bytes).await.unwrap();
-                    } else if !fallible {
-                        kill_switch.send(()).await.unwrap();
-                        break;
-                    }
+    let threadify_dl_stream = |url: Url, fallible: bool| {
+        let client = req_client.clone();
+        let (reader, mut writer) = tokio_pipe::pipe().unwrap();
+        let kill_switch = kill_switch.clone();
+        thread::spawn(move || async move {
+            let mut stream = client.get(url).send().await.unwrap().bytes_stream();
+            while let Some(item) = stream.next().await {
+                if let Ok(bytes) = item {
+                    writer.write_all(&bytes).await.unwrap();
+                } else if !fallible {
+                    kill_switch.send(()).await.unwrap();
+                    break;
                 }
-            });
-            Some(reader)
-        } else {
-            None
-        }
+            }
+        });
+        reader
     };
 
-    let audio_pipe = threadify_dl_stream(audio_url, false);
-    let video_pipe = threadify_dl_stream(video_url, false);
-    let thumbnail_pipe = threadify_dl_stream(thumbnail_url, true);
-    let mut subs_pipes = Vec::with_capacity(subs_urls.len());
-    for (lang, name, url, extension) in subs_urls {
-        if let Some(pipe) = threadify_dl_stream(Some(url), true) {
-            subs_pipes.push((
-                pipe,
-                name,
-                Language::from_639_1(&lang)
-                    .unwrap_or_else(|| Language::from_639_3(&lang).unwrap_or_default()),
-                extension,
-            ));
-        }
-    }
+    let audio_pipes: Vec<_> = audio_urls
+        .into_iter()
+        .map(|(url, lang)| (threadify_dl_stream(url, false), lang))
+        .collect();
+    let video_pipes: Vec<_> = video_urls
+        .into_iter()
+        .map(|(url, lang)| (threadify_dl_stream(url, false), lang))
+        .collect();
+    let subs_pipes: Vec<_> = subs_urls
+        .into_iter()
+        .map(|(url, name, lang, extension)| (threadify_dl_stream(url, true), name, lang, extension))
+        .collect();
+
+    let thumbnail_pipe = thumbnail_url.map(|url| threadify_dl_stream(url, true));
 
     let mut has_video = false;
-    let ext = if video_pipe.is_some() {
-        has_video = true;
-        "mkv"
-    } else {
-        if audio_pipe.is_none() {
+    let ext = if video_pipes.is_empty() {
+        if audio_pipes.is_empty() {
             return;
         }
         "mka"
+    } else {
+        has_video = true;
+        "mkv"
     };
 
+    let title = title.unwrap_or_else(|| "unknown".into());
     let output_path = format!["{base_path}/{title}.{ext}"];
 
     let mut cmd = Command::new("ffmpeg");
 
-    let mut fds_to_map = Vec::with_capacity(
-        subs_pipes.len()
-            + if has_video {
-                1 + if audio_pipe.is_some() { 1 } else { 0 }
-            } else {
-                1
-            },
-    );
+    let mut fds_to_map =
+        Vec::with_capacity(subs_pipes.len() + video_pipes.len() + audio_pipes.len());
 
-    if let Some(video_pipe) = video_pipe {
-        let video_fd = video_pipe.as_raw_fd();
+    for (i, (pipe, lang)) in video_pipes.iter().enumerate() {
+        let fd = pipe.as_raw_fd();
         cmd.arg("-i")
-            .arg(format!["pipe:{video_fd}"])
-            .args(["-map", "0:v"]);
-        fds_to_map.push(video_fd);
+            .arg(format!["pipe:{fd}"])
+            .arg("-map")
+            .arg(format!["{}:v", i]);
+        if let Some(lang) = lang {
+            cmd.arg(format!["-metadata:s:v:{}", i])
+                .arg(format!["language={}", lang.to_639_3()]);
+        }
+        fds_to_map.push(fd);
     }
 
-    if let Some(audio_pipe) = audio_pipe {
-        let audio_fd = audio_pipe.as_raw_fd();
+    for (i, (pipe, lang)) in audio_pipes.iter().enumerate() {
+        let i = i + video_pipes.len();
+        let fd = pipe.as_raw_fd();
         cmd.arg("-i")
-            .arg(format!["pipe:{audio_fd}"])
-            .args(["-map", "1:a"]);
-        fds_to_map.push(audio_fd);
+            .arg(format!["pipe:{fd}"])
+            .arg("-map")
+            .arg(format!["{}:a", i]);
+        if let Some(lang) = lang {
+            cmd.arg(format!["-metadata:s:a:{}", i])
+                .arg(format!["language={}", lang.to_639_3()]);
+        }
+        fds_to_map.push(fd);
     }
 
     for (i, (pipe, name, lang, extension)) in subs_pipes.iter().enumerate() {
+        let i = i + video_pipes.len() + audio_pipes.len();
         let subs_fd = pipe.as_raw_fd();
-        cmd.arg("-f")
-            .arg(extension)
-            .arg("-i")
+        if let Some(extension) = extension {
+            cmd.arg("-f").arg(extension);
+        }
+        cmd.arg("-i")
             .arg(format!["pipe:{subs_fd}"])
             .arg("-map")
-            .arg(format!["{}:s", i])
-            .arg(format!["-metadata:s:s:{}", i])
-            .arg(format!["language={}", lang.to_639_3()])
-            .arg(format!["-metadata:s:s:{}", i])
-            .arg(format!["title={}", name]);
+            .arg(format!["{}:s", i]);
+        if let Some(lang) = lang {
+            cmd.arg(format!["-metadata:s:s:{}", i])
+                .arg(format!["language={}", lang.to_639_3()]);
+        }
+        if let Some(name) = name {
+            cmd.arg(format!["-metadata:s:s:{}", i])
+                .arg(format!["title={}", name]);
+        }
         fds_to_map.push(subs_fd);
     }
 
