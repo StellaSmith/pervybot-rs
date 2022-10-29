@@ -42,15 +42,15 @@ pub struct Format {
 }
 
 #[derive(Deserialize)]
-pub struct SubFormat {
+pub struct SubtitlesFormat {
     pub(crate) ext: Option<String>,
-    pub(crate) url: Option<Url>,
+    pub(crate) url: Url,
     pub(crate) name: Option<String>,
 }
 
 #[derive(Deserialize)]
-pub struct Subtitles {
-    pub(crate) subs: Vec<SubFormat>,
+pub struct SubtitlesGroup {
+    pub(crate) subs: Vec<SubtitlesFormat>,
 }
 
 #[derive(Deserialize)]
@@ -64,7 +64,12 @@ pub struct ThumbNailFormat {
 pub struct StreamData {
     pub(crate) title: Option<String>,
     pub(crate) fulltitle: Option<String>,
-    pub(crate) formats: Vec<Format>,
-    pub(crate) subtitles: Vec<(Option<Language>, Subtitles)>,
-    pub(crate) thumbnails: Vec<ThumbNailFormat>,
+    // pub(crate) formats: Vec<Format>,
+    pub(crate) subtitles: Vec<(Option<Language>, SubtitlesGroup)>,
+    // pub(crate) thumbnails: Vec<ThumbNailFormat>,
+    pub(crate) thumbnail: Option<Url>,
+    pub(crate) url: Option<Url>,
+    pub(crate) language: Option<Language>,
+    pub(crate) audio_ext: Option<String>,
+    pub(crate) video_ext: Option<String>,
 }
