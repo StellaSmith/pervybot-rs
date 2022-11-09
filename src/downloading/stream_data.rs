@@ -41,7 +41,7 @@ pub struct Format {
     pub(crate) width: Option<u64>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct SubtitlesFormat {
     pub(crate) ext: Option<String>,
     pub(crate) url: Url,
@@ -72,4 +72,5 @@ pub struct StreamData {
     pub(crate) language: Option<Language>,
     pub(crate) audio_ext: Option<String>,
     pub(crate) video_ext: Option<String>,
+    pub(crate) extractor_key: Option<String>,
 }

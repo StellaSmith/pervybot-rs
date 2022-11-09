@@ -1,11 +1,25 @@
-pub async fn convert(title: Option<String>, audio_only: bool, stream_pipe: Option<>) {
-    let title = title.unwrap_or_else(|| "unknown".into());
+use std::os::unix::prelude::AsRawFd;
 
-    let ext = if audio_only { "mka" } else { "mkv" };
+use isolang::Language;
+use tokio_command_fds::{CommandFdExt, FdMapping};
+use tokio_pipe::PipeRead;
 
-    let output_path = format!["{base_path}/{title}.{ext}"];
+use crate::stream_dir;
 
-    let mut cmd = Command::new("ffmpeg");
+use super::{
+    stream_data::{StreamData, SubtitlesFormat},
+    KillSignal,
+};
+
+pub async fn convert(
+    mut kill_signal: KillSignal,
+    data: StreamData,
+    audio_only: bool,
+    stream_pipe: Option<(PipeRead, Option<Language>)>,
+    subs_pipe: Option<(PipeRead, Option<Language>, SubtitlesFormat)>,
+    thumbnail_pipe: Option<PipeRead>,
+) {
+    let mut cmd = tokio::process::Command::new("ffmpeg");
 
     let mut fds_to_map =
         Vec::with_capacity(subs_pipe.is_some() as usize + stream_pipe.is_some() as usize);
@@ -34,10 +48,10 @@ pub async fn convert(title: Option<String>, audio_only: bool, stream_pipe: Optio
         fds_to_map.push(fd);
     }
 
-    for (i, (pipe, name, lang, extension)) in subs_pipe.iter().enumerate() {
+    for (i, (pipe, lang, SubtitlesFormat { ext, url: _, name })) in subs_pipe.iter().enumerate() {
         let i = i + stream_pipe.is_some() as usize;
         let subs_fd = pipe.as_raw_fd();
-        if let Some(extension) = extension {
+        if let Some(extension) = ext {
             cmd.arg("-f").arg(extension);
         }
         cmd.arg("-i")
@@ -65,7 +79,13 @@ pub async fn convert(title: Option<String>, audio_only: bool, stream_pipe: Optio
         cmd.args(["-r", "30"]);
     }
 
-    cmd.arg(output_path);
+    let platform = data.extractor_key.unwrap_or_else(|| "unknown".into());
+    let title = data.title.unwrap_or_else(|| "unknown".into());
+    let ext = if audio_only { "mka" } else { "mkv" };
+
+    let file_name = sanitize_filename::sanitize(format!["{title} - {platform}.{ext}"]);
+
+    cmd.arg(stream_dir().join(file_name));
 
     let fd_mappings: Vec<_> = fds_to_map
         .iter()

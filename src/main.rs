@@ -1,7 +1,8 @@
 mod commands;
 mod database;
-mod hashing;
 mod downloading;
+
+use std::path::PathBuf;
 
 use serenity::async_trait;
 
@@ -10,12 +11,14 @@ use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
 use serenity::prelude::*;
 
-const STREAM_DIR: &str = "./stream_queue/";
+fn stream_dir() -> PathBuf {
+    std::env::var("STREAM_DOWNLOAD_DIR").unwrap().into()
+}
 
 fn init() {
     std::fs::DirBuilder::new()
         .recursive(true)
-        .create(STREAM_DIR)
+        .create(stream_dir())
         .unwrap();
 }
 
