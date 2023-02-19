@@ -32,7 +32,7 @@ pub async fn ping(ctx: &Context, msg: &Message) -> CommandResult {
                 .fetch_one(db)
                 .await
             {
-                Ok(result) => format!("Pong {}!", result),
+                Ok(result) => format!("Pong {result}!"),
                 Err(err) => {
                     log::error!("failed to pong: {:?}", err);
                     "Failed to pong :(".to_owned()
