@@ -14,7 +14,7 @@ sqlx = { version = "0.6", features = [
     "chrono",
 ] }
 dotenv = "0.15"
-regex = "1.6"
+regex = "1.7"
 env-file-reader = "0.3"
 
 lazy_static = "1.4"
