@@ -1,0 +1,8 @@
+CREATE TABLE pings (
+	id BIGSERIAL NOT NULL,
+	author_id BIGINT NOT NULL,
+	channel_id BIGINT NOT NULL,
+	message_id BIGINT NOT NULL,
+	"timestamp" TIMESTAMPTZ NOT NULL,
+	CONSTRAINT pk_ping PRIMARY KEY (id)
+);

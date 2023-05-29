@@ -68,6 +68,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     init();
 
+    log::info!("connecting to database");
+    let db = {
+        let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+        sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(core::time::Duration::from_secs(15))
+            .connect(&db_url)
+            .await?
+    };
+
+    sqlx::migrate!("./migrations/").run(&db).await?;
+
     let framework = StandardFramework::new()
         .configure(|c| {
             c.case_insensitivity(true)
@@ -85,11 +96,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Error creating client");
 
-    log::info!("connecting to database");
-    let db = {
-        let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL");
-        sqlx::any::AnyPoolOptions::new().connect(&db_url).await?
-    };
     {
         let mut lock = client.data.write().await;
         lock.insert::<database::Database>(database::Database(db));
