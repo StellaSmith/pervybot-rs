@@ -17,6 +17,8 @@ pub async fn download_info_json(url: Url) -> StreamData {
             "\"(bv[height<=720]+ba/bv[height<=720]*+ba/b[height<=720])[filesize<100M]\"",
             // Reject playlists
             "--no-playlist",
+            // Make YT default
+            "--default-search \"ytsearch\"",
             // Write JSON to stdout
             "-j",
         ])
