@@ -19,7 +19,7 @@ pub async fn download_info_json(url: Url) -> StreamData {
             "--no-playlist",
             // Make YT default
             "--default-search",
-            "\"ytsearch\"",
+            "ytsearch",
             // Write JSON to stdout
             "-j",
         ])
