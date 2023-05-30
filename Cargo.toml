@@ -20,3 +20,21 @@ env-file-reader = "0.3"
 lazy_static = "1.4"
 log = "0.4"
 env_logger = "0.10"
+
+# For piping to ffmpeg
+tokio-pipe = "0.2"
+tokio-command-fds = "0.2.1"
+# For downloading content streams
+reqwest = "0.11"
+# For validating user-inputed URLs
+url = "2.3"
+# For running commands asynchronously
+# async-process = "1.5"
+# For deserializing into types
+serde = "1.0"
+# For parsing info.json
+serde_json = "1.0"
+# For sanitizing saved files' names
+sanitize-filename = "0.4.0"
+# For parsing language identifiers
+isolang = { version = "2.0", features = ["serde"] }

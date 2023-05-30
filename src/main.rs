@@ -1,5 +1,8 @@
 mod commands;
 mod database;
+mod downloading;
+
+use std::path::PathBuf;
 
 use serenity::async_trait;
 
@@ -7,6 +10,17 @@ use serenity::framework::StandardFramework;
 use serenity::model::channel::Message;
 use serenity::model::id::ChannelId;
 use serenity::prelude::*;
+
+fn stream_dir() -> PathBuf {
+    std::env::var("STREAM_DOWNLOAD_DIR").unwrap().into()
+}
+
+fn init() {
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .create(stream_dir())
+        .unwrap();
+}
 
 struct Handler;
 
@@ -52,6 +66,7 @@ async fn dynamic_prefix(ctx: &Context, msg: &Message) -> Option<String> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
     env_logger::init();
+    init();
 
     log::info!("connecting to database");
     let db = {
